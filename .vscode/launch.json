@@ -7,19 +7,28 @@
         {
             "name": "debug",
             "request": "launch",
-            "type": "dart"
+            "type": "dart",
+            "args": [
+                "--verbose"
+            ]
         },
         {
             "name": "profile",
             "request": "launch",
             "type": "dart",
-            "flutterMode": "profile"
+            "flutterMode": "profile",
+            "args": [
+                "--verbose"
+            ]
         },
         {
             "name": "release",
             "request": "launch",
             "type": "dart",
-            "flutterMode": "release"
+            "flutterMode": "release",
+            "args": [
+                "--verbose"
+            ]
         }
     ]
 }
