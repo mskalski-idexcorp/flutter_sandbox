@@ -29,6 +29,17 @@
             "args": [
                 "--verbose"
             ]
-        }
+        },
+        {
+            "name": "debug web-server at localhost:8080",
+            "request": "launch",
+            "type": "dart",
+            "args": [
+                "-d",
+                "web-server",
+                "--web-port=8080",
+                "--web-hostname=localhost"
+            ]
+        },
     ]
 }
