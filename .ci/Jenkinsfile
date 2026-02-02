@@ -1,0 +1,100 @@
+pipeline {
+    agent { label 'Windows-WEB-builder-0' }
+    
+    parameters {
+        string(
+            name: 'BRANCH_NAME',
+            defaultValue: 'main',
+            description: 'Git branch to build and analyze'
+        )
+        string(
+            name: 'FLUTTER_VERSION',
+            defaultValue: '3.38.9',
+            description: 'Flutter version tag to use (e.g. 3.38.9)'
+        )
+    }
+    
+    options {
+        timestamps()
+        timeout(time: 1, unit: 'HOURS')
+    }
+    
+    environment {
+        FLUTTER_GIT_URL = "https://github.com/flutter/flutter.git"
+        FLUTTER_HOME = "${WORKSPACE}/../flutter"
+    }
+    
+    stages {
+        stage('Checkout') {
+            steps {
+                checkout([
+                    $class: 'GitSCM',
+                    userRemoteConfigs: [[url: scm.userRemoteConfigs[0].url]],
+                    branches: [[name: params.BRANCH_NAME]]
+                ])
+            }
+        }
+        
+        stage('Setup Flutter') {
+            steps {
+                dir(FLUTTER_HOME) {
+                    checkout([
+                        $class: 'GitSCM',
+                        userRemoteConfigs: [[url: FLUTTER_GIT_URL]],
+                        branches: [[name: "refs/tags/${params.FLUTTER_VERSION}"]]
+                    ])
+                }
+                
+                script {
+                    env.PATH = "${FLUTTER_HOME}/bin${isUnix() ? ':' : ';'}${env.PATH}"
+                    runCommand('Check Flutter version', 'flutter --version')
+                    runCommand('Run Flutter doctor', 'flutter doctor -v')
+                }
+            }
+        }
+        
+        stage('Install Dependencies') {
+            steps {
+                script {
+                    runCommand('Get Flutter dependencies', 'flutter pub get')
+                }
+            }
+        }
+        
+        stage('Flutter Analyze') {
+            steps {
+                script {
+                    runCommand('Run static analysis', 'flutter analyze --fatal-warnings --fatal-infos --no-pub')
+                }
+            }
+        }
+        
+        stage('Build') {
+            parallel {
+                stage('Build Windows') {
+                    steps {
+                        script {
+                            runCommand('Build Windows', 'flutter build windows --release --no-pub')
+                        }
+                    }
+                }
+            }
+        }
+        
+        stage('Run Tests') {
+            steps {
+                script {
+                    runCommand('Run unit and widget tests', 'flutter test --coverage --no-pub --reporter expanded')
+                }
+            }
+        }
+    }
+}
+
+def runCommand(String label, String command) {
+    if (isUnix()) {
+        sh label: label, script: command
+    } else {
+        bat label: label, script: command
+    }
+}
