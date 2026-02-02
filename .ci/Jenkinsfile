@@ -1,0 +1,164 @@
+/* groovylint-disable DuplicateStringLiteral, NestedBlockDepth, UnnecessaryGetter */
+/* groovylint-disable-next-line CompileStatic */
+pipeline {
+    agent { label params.WINDOWS_AGENT }
+
+    parameters {
+        string(
+            name: 'BRANCH_NAME',
+            defaultValue: 'main',
+            description: 'Git branch to build and analyze'
+        )
+        string(
+            name: 'FLUTTER_VERSION',
+            defaultValue: '3.38.9',
+            description: 'Flutter version tag to use (e.g. 3.38.9)'
+        )
+        booleanParam(
+            name: 'BUILD_WINDOWS',
+            defaultValue: true,
+            description: 'Build Windows version'
+        )
+        booleanParam(
+            name: 'BUILD_LINUX',
+            defaultValue: true,
+            description: 'Build Linux version'
+        )
+        choice(
+            name: 'WINDOWS_AGENT',
+            choices: ['AWWCPSAPPBUILD', 'Windows_VX_builder', 'Windows-WEB-builder-0'],
+            description: 'Windows agent label'
+        )
+        choice(
+            name: 'LINUX_AGENT',
+            choices: ['Linux-builder', 'Linux-App-Builder-Fleet'],
+            description: 'Linux agent label'
+        )
+    }
+
+    options {
+        skipDefaultCheckout()
+        timestamps()
+        timeout(time: 1, unit: 'HOURS')
+    }
+
+    environment {
+        WORKSPACE_STASH_NAME = 'flutter-sandbox-workspace'
+    }
+
+    stages {
+        stage('Checkout') {
+            steps {
+                script { gitCheckout(scm.userRemoteConfigs[0].url, params.BRANCH_NAME) }
+                stash name: WORKSPACE_STASH_NAME, useDefaultExcludes: false
+            }
+        }
+
+        stage('[Windows] Setup Flutter') {
+            steps {
+                script { setupFlutterSdk() }
+                bat label: 'Check Flutter version', script: 'flutter --version'
+                bat label: 'Run Flutter doctor', script: 'flutter doctor --verbose' // TODO: Should fail the pipeline on issues
+            }
+        }
+
+        stage('[Windows] Install Dependencies') {
+            steps {
+                bat label: 'Get Flutter dependencies', script: 'flutter pub get'
+            }
+        }
+
+        stage('[Windows] Dart Format') {
+            steps {
+                bat label: 'Check formatting', script: 'dart format --output none --set-exit-if-changed .'
+            }
+        }
+
+        stage('[Windows] Flutter Analyze') {
+            steps {
+                bat label: 'Run static analysis', script: 'flutter analyze --fatal-warnings --fatal-infos --no-pub'
+            }
+        }
+
+        stage('[Windows] Flutter Test') {
+            steps {
+                bat label: 'Run unit and widget tests', script: 'flutter test --coverage --no-pub --reporter expanded'
+                script { checkCoverage() }
+            }
+        }
+
+        // TODO: How to avoid restarting all builds if only one fails?
+        stage('Parallel Build') {
+            parallel {
+                stage('[Windows] Build Release') {
+                    when { expression { params.BUILD_WINDOWS } }
+
+                    steps {
+                        bat label: 'Build Windows Release', script: 'flutter build windows --release'
+                    }
+                }
+
+                stage('[Linux] Build Release') {
+                    when { expression { params.BUILD_LINUX } }
+                    agent { label params.LINUX_AGENT }
+
+                    steps {
+                        unstash WORKSPACE_STASH_NAME
+
+                        script { setupFlutterSdk() }
+                        sh label: 'Check Flutter version', script: 'flutter --version'
+                        sh label: 'Run Flutter doctor', script: 'flutter doctor --verbose' // TODO: Should fail the pipeline on issues
+
+                        sh label: 'Get Flutter dependencies', script: 'flutter pub get'
+
+                        sh label: 'Build Linux Release', script: 'flutter build linux --release'
+                    }
+                }
+            }
+        }
+    }
+}
+
+void gitCheckout(String url, String branch) {
+    checkout([
+        $class: 'GitSCM',
+        userRemoteConfigs: [[url: url]],
+        branches: [[name: branch]]
+    ])
+}
+
+void setupFlutterSdk() {
+    String flutterHome = "${WORKSPACE}/../flutter"
+
+    dir(flutterHome) {
+        gitCheckout('https://github.com/flutter/flutter.git', "refs/tags/${params.FLUTTER_VERSION}")
+    }
+
+    String sep = isUnix() ? ':' : ';'
+    env.PATH = "${flutterHome}/bin${sep}${env.PATH}"
+}
+
+void checkCoverage() {
+    String lcov = readFile('coverage/lcov.info')
+    List<String> lines = lcov.readLines()
+    int coveredLines = 0 // groovylint-disable DuplicateNumberLiteral
+    int totalLines = 0 // groovylint-disable DuplicateNumberLiteral
+
+    lines.each { line ->
+        if (line.startsWith('LF:')) {
+            totalLines += line.split(':')[1].toInteger()
+        }
+        if (line.startsWith('LH:')) {
+            coveredLines += line.split(':')[1].toInteger()
+        }
+    }
+
+    if (coveredLines < totalLines) {
+        error("Coverage is below required 100%! Covered ${coveredLines} out of ${totalLines} lines. " +
+              'Please add tests for uncovered lines.\n' +
+              'If they are not testable ignore them with coverage:ignore comments: ' +
+              'coverage:ignore-file, coverage:ignore-[start/end], coverage:ignore-line.')
+    }
+
+    echo 'Coverage checks passed!'
+}
