@@ -1,6 +1,8 @@
+/* groovylint-disable DuplicateStringLiteral, NestedBlockDepth, UnnecessaryGetter */
+/* groovylint-disable-next-line CompileStatic */
 pipeline {
-    agent { label 'Windows-WEB-builder-0' }
-    
+    agent { label params.WINDOWS_AGENT }
+
     parameters {
         string(
             name: 'BRANCH_NAME',
@@ -12,89 +14,125 @@ pipeline {
             defaultValue: '3.38.9',
             description: 'Flutter version tag to use (e.g. 3.38.9)'
         )
+        choice(
+            name: 'WINDOWS_AGENT',
+            choices: ['Windows-WEB-builder-0'],
+            description: 'Windows agent label'
+        )
+        choice(
+            name: 'LINUX_AGENT',
+            choices: ['Linux-builder', 'Linux-App-Builder-Fleet'],
+            description: 'Linux agent label'
+        )
     }
-    
+
     options {
+        skipDefaultCheckout()
         timestamps()
         timeout(time: 1, unit: 'HOURS')
     }
-    
+
     environment {
-        FLUTTER_GIT_URL = "https://github.com/flutter/flutter.git"
-        FLUTTER_HOME = "${WORKSPACE}/../flutter"
+        WORKSPACE_STASH_NAME = 'flutter-sandbox-workspace'
     }
-    
+
     stages {
         stage('Checkout') {
             steps {
-                checkout([
-                    $class: 'GitSCM',
-                    userRemoteConfigs: [[url: scm.userRemoteConfigs[0].url]],
-                    branches: [[name: params.BRANCH_NAME]]
-                ])
+                script { gitCheckout(scm.userRemoteConfigs[0].url, params.BRANCH_NAME) }
+                stash name: WORKSPACE_STASH_NAME, useDefaultExcludes: false
             }
         }
-        
-        stage('Setup Flutter') {
+
+        stage('Setup Flutter Windows') {
             steps {
-                dir(FLUTTER_HOME) {
-                    checkout([
-                        $class: 'GitSCM',
-                        userRemoteConfigs: [[url: FLUTTER_GIT_URL]],
-                        branches: [[name: "refs/tags/${params.FLUTTER_VERSION}"]]
-                    ])
-                }
-                
-                script {
-                    env.PATH = "${FLUTTER_HOME}/bin${isUnix() ? ':' : ';'}${env.PATH}"
-                    runCommand('Check Flutter version', 'flutter --version')
-                    runCommand('Run Flutter doctor', 'flutter doctor -v')
-                }
+                script { setupFlutterSdk() }
+                bat label: 'Check Flutter version', script: 'flutter --version'
+                bat label: 'Run Flutter doctor', script: 'flutter doctor -v' // TODO: Should fail the pipeline on issues
             }
         }
-        
+
         stage('Install Dependencies') {
             steps {
-                script {
-                    runCommand('Get Flutter dependencies', 'flutter pub get')
-                }
+                bat label: 'Get Flutter dependencies', script: 'flutter pub get'
             }
         }
-        
+
         stage('Flutter Analyze') {
             steps {
-                script {
-                    runCommand('Run static analysis', 'flutter analyze --fatal-warnings --fatal-infos --no-pub')
-                }
+                bat label: 'Run static analysis', script: 'flutter analyze --fatal-warnings --fatal-infos --no-pub'
             }
         }
-        
-        stage('Build') {
+
+        stage('Flutter Test') {
+            steps {
+                // TODO: Analyze coverage reports and fail the build if coverage is below a certain threshold
+                bat label: 'Run unit and widget tests', script: 'flutter test --coverage --no-pub --reporter expanded'
+            }
+        }
+
+        // TODO: How to avoid restarting all builds if only one fails?
+        stage('Parallel Build') {
             parallel {
+                // TODO: Add flags to disable specific builds and use when directive to control it
                 stage('Build Windows') {
                     steps {
-                        script {
-                            runCommand('Build Windows', 'flutter build windows --release --no-pub')
-                        }
+                        bat label: 'Build Windows Release', script: 'flutter build windows --release'
                     }
                 }
-            }
-        }
-        
-        stage('Run Tests') {
-            steps {
-                script {
-                    runCommand('Run unit and widget tests', 'flutter test --coverage --no-pub --reporter expanded')
+
+                stage('Build Linux') {
+                    agent { label params.LINUX_AGENT }
+
+                    stages {
+                        stage('Unstash Linux') {
+                            steps {
+                                unstash WORKSPACE_STASH_NAME
+                            }
+                        }
+
+                        stage('Setup Flutter Linux') {
+                            steps {
+                                script { setupFlutterSdk() }
+
+                                sh label: 'Check Flutter version', script: 'flutter --version'
+                                sh label: 'Run Flutter doctor', script: 'flutter doctor -v' // TODO: Should fail the pipeline on issues
+                            }
+                        }
+
+                        stage('Install Linux Dependencies') {
+                            steps {
+                                sh label: 'Get Flutter dependencies', script: 'flutter pub get'
+                            }
+                        }
+
+                        stage('Build Linux') {
+                            steps {
+                                sh label: 'Build Linux Release', script: 'flutter build linux --release'
+                            }
+                        }
+                    }
                 }
             }
         }
     }
 }
 
-def runCommand(String label, String command) {
-    if (isUnix()) {
-        sh label: label, script: command
-    } else {
-        bat label: label, script: command
+void gitCheckout(String url, String branch) {
+    checkout([
+        $class: 'GitSCM',
+        userRemoteConfigs: [[url: url]],
+        branches: [[name: branch]]
+    ])
+}
+
+void setupFlutterSdk() {
+    String flutterHome = "${WORKSPACE}/../flutter"
+
+    dir(flutterHome) {
+        gitCheckout('https://github.com/flutter/flutter.git', "refs/tags/${params.FLUTTER_VERSION}")
     }
+
+    String sep = isUnix() ? ':' : ';'
+    env.PATH = "${flutterHome}/bin${sep}${env.PATH}"
 }
