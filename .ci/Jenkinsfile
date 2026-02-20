@@ -131,7 +131,12 @@ void setupFlutterSdk() {
     String flutterHome = "${WORKSPACE}/../flutter"
 
     dir(flutterHome) {
-        gitCheckout('https://github.com/flutter/flutter.git', "refs/tags/${params.FLUTTER_VERSION}")
+        checkout([
+            $class: 'GitSCM',
+            userRemoteConfigs: [[url: 'https://github.com/flutter/flutter.git']],
+            branches: [[name: "refs/tags/${params.FLUTTER_VERSION}"]],
+            extensions: [[$class: 'LocalBranch', localBranch: 'stable']]
+        ])
     }
 
     String sep = isUnix() ? ':' : ';'
