@@ -105,7 +105,7 @@ pipeline {
                     steps {
                         unstash WORKSPACE_STASH_NAME
 
-                        script { setupFlutterSdk() }
+                        // script { setupFlutterSdk() }
                         sh label: 'Check Flutter version', script: 'flutter --version'
                         sh label: 'Run Flutter doctor', script: 'flutter doctor --verbose' // TODO: Should fail the pipeline on issues
 
