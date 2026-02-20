@@ -106,12 +106,15 @@ pipeline {
                         unstash WORKSPACE_STASH_NAME
 
                         // script { setupFlutterSdk() }
-                        sh label: 'Check Flutter version', script: 'flutter --version'
-                        sh label: 'Run Flutter doctor', script: 'flutter doctor --verbose' // TODO: Should fail the pipeline on issues
+                        // TODO: Parametrize Flutter version
+                        withEnv(["PATH=${env.WORKSPACE}/../flutter-3.41.2-stable/flutter/bin:${env.PATH}"]) {
+                            sh label: 'Check Flutter version', script: 'flutter --version'
+                            sh label: 'Run Flutter doctor', script: 'flutter doctor --verbose' // TODO: Should fail the pipeline on issues
 
-                        sh label: 'Get Flutter dependencies', script: 'flutter pub get'
+                            sh label: 'Get Flutter dependencies', script: 'flutter pub get'
 
-                        sh label: 'Build Linux Release', script: 'flutter build linux --release'
+                            sh label: 'Build Linux Release', script: 'flutter build linux --release'
+                        }
                     }
                 }
             }
