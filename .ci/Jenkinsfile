@@ -108,6 +108,11 @@ pipeline {
                         // script { setupFlutterSdk() }
                         // TODO: Parametrize Flutter version
                         withEnv(["PATH=${env.WORKSPACE}/../flutter-3.41.2-stable/flutter/bin:${env.PATH}"]) {
+                            sh script: 'echo $PATH', label: 'Print PATH for debugging'
+                            sh script: "echo ${env.PATH}", label: 'Print env.PATH for debugging'
+                            sh script: "echo ${env.WORKSPACE}", label: 'Print WORKSPACE for debugging'
+                            sh script: 'which flutter', label: 'Check Flutter path'
+
                             sh label: 'Check Flutter version', script: 'flutter --version'
                             sh label: 'Run Flutter doctor', script: 'flutter doctor --verbose' // TODO: Should fail the pipeline on issues
 
